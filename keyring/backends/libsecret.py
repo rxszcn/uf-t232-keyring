@@ -6,7 +6,7 @@ from ..compat import properties
 from ..credentials import SimpleCredential
 from ..errors import (
     KeyringLocked,
-    PasswordDeleteError,
+    PasswordNotFound,
     PasswordSetError,
 )
 
@@ -121,8 +121,10 @@ class Keyring(backend.SchemeSelectable, KeyringBackend):
                 if error.matches(quark, Secret.Error.IS_LOCKED):
                     raise KeyringLocked('Failed to unlock the item!') from error
                 raise
+            if not removed:
+                raise PasswordNotFound(service=service, username=username)
             return removed
-        raise PasswordDeleteError("No such password!")
+        raise PasswordNotFound(service=service, username=username)
 
     def get_credential(self, service, username):
         """Get the first username and password for a service.

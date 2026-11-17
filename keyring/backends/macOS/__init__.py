@@ -6,7 +6,14 @@ import warnings
 
 from ...backend import KeyringBackend
 from ...compat import properties
-from ...errors import KeyringError, KeyringLocked, PasswordDeleteError, PasswordSetError
+from ...errors import (
+    KeyringError,
+    KeyringLocked,
+    PasswordDeleteError,
+    PasswordNotFound,
+    PasswordSetError,
+    PasswordStoreUnavailable,
+)
 
 with contextlib.suppress(Exception):
     from . import api
@@ -72,8 +79,20 @@ class Keyring(KeyringBackend):
 
         try:
             return api.delete_generic_password(self.keychain, service, username)
+        except api.NotFound as e:
+            raise PasswordNotFound(service=service, username=username) from e
+        except (api.KeychainDenied, api.SecAuthFailure) as e:
+            raise PasswordStoreUnavailable(
+                f"Can't delete password in keychain: {e}",
+                service=service,
+                username=username,
+            ) from e
         except api.Error as e:
-            raise PasswordDeleteError(f"Can't delete password in keychain: {e}") from e
+            raise PasswordDeleteError(
+                f"Can't delete password in keychain: {e}",
+                service=service,
+                username=username,
+            ) from e
 
     def with_keychain(self, keychain):
         warnings.warn(

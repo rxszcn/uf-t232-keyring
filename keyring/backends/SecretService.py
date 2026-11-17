@@ -10,7 +10,7 @@ from ..credentials import SimpleCredential
 from ..errors import (
     InitError,
     KeyringLocked,
-    PasswordDeleteError,
+    PasswordNotFound,
 )
 
 try:
@@ -98,7 +98,7 @@ class Keyring(backend.SchemeSelectable, KeyringBackend):
             items = collection.search_items(self._query(service, username))
             for item in items:
                 return item.delete()
-        raise PasswordDeleteError("No such password!")
+        raise PasswordNotFound(service=service, username=username)
 
     def get_credential(self, service, username):
         """Gets the first username and password for a service.

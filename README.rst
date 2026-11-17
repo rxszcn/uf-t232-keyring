@@ -425,8 +425,47 @@ The keyring lib raises the following exceptions:
 
 * ``keyring.errors.KeyringError``: Base Error class for all exceptions in keyring lib.
 * ``keyring.errors.InitError``: Raised when the keyring cannot be initialized.
+* ``keyring.errors.KeyringLocked``: Raised when the keyring could not be unlocked.
 * ``keyring.errors.PasswordSetError``: Raised when the password cannot be set in the keyring.
 * ``keyring.errors.PasswordDeleteError``: Raised when the password cannot be deleted in the keyring.
+* ``keyring.errors.PasswordNotFound``: Subclass of ``PasswordDeleteError`` raised
+  when the password to delete does not exist. Deleting an absent credential is
+  idempotent, so callers should treat it as already-deleted and must not retry
+  it indefinitely.
+* ``keyring.errors.PasswordStoreUnavailable``: Subclass of both
+  ``PasswordDeleteError`` and ``KeyringLocked`` raised when a deletion cannot be
+  attempted because the credential store is locked or otherwise unavailable.
+  This is the highest-severity deletion failure: cleanup must not be reported
+  as successful.
+
+``PasswordNotFound``, ``PasswordDeleteError`` and ``PasswordStoreUnavailable``
+are distinct types so "there was nothing to delete", "deletion failed" and
+"the store is unavailable" are distinguishable without parsing messages. For
+convenience, ``keyring.errors.classify_delete_error(exc)`` returns the matching
+``keyring.errors.DeleteOutcome`` (``NOT_FOUND``, ``FAILED`` or ``UNAVAILABLE``)
+and each exception exposes the same value as its ``kind`` attribute:
+
+.. code-block:: python
+
+    from keyring import errors
+
+    try:
+        keyring.delete_password(service, username)
+    except errors.KeyringError as exc:
+        outcome = errors.classify_delete_error(exc)
+        if outcome is errors.DeleteOutcome.NOT_FOUND:
+            pass  # already deleted; nothing to retry
+        elif outcome is errors.DeleteOutcome.UNAVAILABLE:
+            raise  # page someone; the store itself is broken
+        else:
+            retry_later()
+
+Third-party backends are classified conservatively: only
+``PasswordNotFound`` maps to ``NOT_FOUND``. A backend that raises a plain
+``PasswordDeleteError`` for a missing credential (i.e. distinguishes absence
+from failure only by message) is classified as ``FAILED`` and fails the shared
+``keyring.testing.backend.BackendBasicTests`` harness until updated.
+
 
 Get Involved
 ============

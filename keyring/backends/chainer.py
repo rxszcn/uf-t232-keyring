@@ -3,7 +3,7 @@ Keyring Chainer - iterates over other viable backends to
 discover passwords in each.
 """
 
-from .. import backend
+from .. import backend, errors
 from ..compat import properties
 from . import fail
 
@@ -58,11 +58,42 @@ class ChainerBackend(backend.KeyringBackend):
                 pass
 
     def delete_password(self, service, username):
+        """
+        Delete the password from the first backend that holds it.
+
+        A backend reporting absence does not stop the search, so a credential
+        stored in a lower-priority backend is still deleted. If no backend
+        holds the credential, the aggregated error preserves the deletion
+        semantics: the most severe failure seen is re-raised (a locked or
+        failing store is never downgraded to "not found"), and only when no
+        backend reported a failure is ``PasswordNotFound`` raised.
+        """
+        deferred = None
         for keyring in self.backends:
             try:
                 return keyring.delete_password(service, username)
             except NotImplementedError:
                 pass
+            except errors.KeyringError as exc:
+                outcome = errors.classify_delete_error(exc)
+                if outcome is errors.DeleteOutcome.NOT_FOUND:
+                    # Absence here doesn't mean absence everywhere; keep
+                    # looking so a lower-priority backend still gets cleaned.
+                    continue
+                if deferred is None or self._severity(exc) > self._severity(deferred):
+                    deferred = exc
+        if deferred is not None:
+            raise deferred
+        raise errors.PasswordNotFound(service=service, username=username)
+
+    @staticmethod
+    def _severity(exc: BaseException) -> int:
+        outcome = errors.classify_delete_error(exc)
+        return {
+            errors.DeleteOutcome.NOT_FOUND: 0,
+            errors.DeleteOutcome.FAILED: 1,
+            errors.DeleteOutcome.UNAVAILABLE: 2,
+        }[outcome]
 
     def get_credential(self, service, username):
         for keyring in self.backends:

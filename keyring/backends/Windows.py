@@ -7,7 +7,7 @@ from jaraco.context import ExceptionTrap
 from ..backend import KeyringBackend
 from ..compat import properties
 from ..credentials import SimpleCredential
-from ..errors import PasswordDeleteError
+from ..errors import PasswordNotFound, PasswordStoreUnavailable
 
 with ExceptionTrap() as missing_deps:
     try:
@@ -148,12 +148,29 @@ class WinVaultKeyring(KeyringBackend):
         compound = self._compound_name(username, service)
         deleted = False
         for target in service, compound:
-            existing_pw = self._read_credential(target)
+            try:
+                existing_pw = self._read_credential(target)
+            except pywintypes.error as e:
+                # The vault refused access (locked profile, access denied,
+                # ...). This is not "not found"; it must be reported as a
+                # store failure so callers don't record a false success.
+                raise PasswordStoreUnavailable(
+                    f"Windows Credential Manager unavailable: {e}",
+                    service=service,
+                    username=username,
+                ) from e
             if existing_pw and existing_pw['UserName'] == username:
                 deleted = True
-                self._delete_password(target)
+                try:
+                    self._delete_password(target)
+                except pywintypes.error as e:
+                    raise PasswordStoreUnavailable(
+                        f"Windows Credential Manager unavailable: {e}",
+                        service=service,
+                        username=username,
+                    ) from e
         if not deleted:
-            raise PasswordDeleteError(service)
+            raise PasswordNotFound(service=service, username=username)
 
     def _delete_password(self, target):
         try:

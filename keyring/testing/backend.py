@@ -2,6 +2,7 @@
 Common test functionality for backends.
 """
 
+import contextlib
 import os
 import string
 
@@ -29,6 +30,45 @@ def is_ascii_printable(s):
     return all(32 <= ord(c) < 127 for c in s)
 
 
+def assert_delete_not_found(keyring, service, username):
+    """
+    Assert that deleting an absent credential is reported as "not found".
+
+    This is the shared guardrail for the deletion contract: "nothing to
+    delete" must be type-level distinguishable from "deletion failed", and
+    must classify as :attr:`errors.DeleteOutcome.NOT_FOUND`.
+
+    A backend that reports a missing credential with the same exception type
+    it uses for a genuine deletion failure ("two-faced" backend) fails this
+    assertion, because a plain :class:`errors.PasswordDeleteError` classifies
+    as :attr:`errors.DeleteOutcome.FAILED`. This intentionally turns red for
+    backends that only distinguish the two cases by their message.
+    """
+    try:
+        keyring.delete_password(service, username)
+    except errors.PasswordNotFound as exc:
+        outcome = errors.classify_delete_error(exc)
+        assert outcome is errors.DeleteOutcome.NOT_FOUND, (
+            "delete_password raised PasswordNotFound but classified as "
+            f"{outcome.value!r}"
+        )
+        return
+    except errors.PasswordDeleteError as exc:
+        outcome = errors.classify_delete_error(exc)
+        raise AssertionError(
+            "delete_password reported a missing credential as "
+            f"{outcome.value!r} using {type(exc).__name__}; absence must be "
+            "type-distinguishable from failure (raise "
+            "keyring.errors.PasswordNotFound)"
+        ) from exc
+    else:
+        raise AssertionError(
+            "delete_password of an absent credential returned normally; it "
+            "must raise keyring.errors.PasswordNotFound so callers can tell "
+            "absence from failure"
+        )
+
+
 class BackendBasicTests:
     """Test for the keyring's basic functions. password_set and password_get"""
 
@@ -42,7 +82,9 @@ class BackendBasicTests:
 
     def cleanup(self):
         for item in self.credentials_created:
-            self.keyring.delete_password(*item)
+            # Cleanup must tolerate credentials the test already removed.
+            with contextlib.suppress(errors.PasswordDeleteError):
+                self.keyring.delete_password(*item)
 
     def set_password(self, service, username, password):
         # set the password and save the result so the test runner can clean
@@ -93,8 +135,25 @@ class BackendBasicTests:
     def test_delete_not_present(self):
         username = random_string(20, self.DIFFICULT_CHARS)
         service = random_string(20, self.DIFFICULT_CHARS)
-        with pytest.raises(errors.PasswordDeleteError):
-            self.keyring.delete_password(service, username)
+        assert_delete_not_found(self.keyring, service, username)
+
+    def test_delete_twice_is_idempotent(self):
+        """
+        Deleting the same credential twice must be a well-defined no-op.
+
+        The first call succeeds; the second reports "not found" (and must not
+        be reported as a store failure), which lets rotation pipelines treat
+        an absent credential as already deleted instead of retrying forever.
+        """
+        username = random_string(20, self.DIFFICULT_CHARS)
+        service = random_string(20, self.DIFFICULT_CHARS)
+        password = random_string(20, self.DIFFICULT_CHARS)
+        self.set_password(service, username, password)
+
+        self.keyring.delete_password(service, username)
+        assert self.keyring.get_password(service, username) is None
+
+        assert_delete_not_found(self.keyring, service, username)
 
     def test_delete_one_in_group(self):
         username1 = random_string(20, self.DIFFICULT_CHARS)

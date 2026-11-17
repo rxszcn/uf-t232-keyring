@@ -1,0 +1,9 @@
+Deletion failures are now distinguishable from missing credentials.
+``keyring.errors.PasswordNotFound`` (a ``PasswordDeleteError`` subclass) means
+nothing was there to delete, and ``keyring.errors.PasswordStoreUnavailable``
+(a ``PasswordDeleteError`` and ``KeyringLocked`` subclass) means the store could
+not be reached. ``keyring.errors.classify_delete_error`` maps any deletion error
+to ``DeleteOutcome.NOT_FOUND``, ``FAILED`` or ``UNAVAILABLE``. All built-in
+backends now raise the right type, and ``keyring.testing.backend`` fails any
+backend that reports both semantics with one exception type (differing only by
+message). Existing ``except PasswordDeleteError`` handlers keep working.

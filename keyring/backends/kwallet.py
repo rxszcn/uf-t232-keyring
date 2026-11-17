@@ -5,7 +5,13 @@ import sys
 from ..backend import KeyringBackend
 from ..compat import properties
 from ..credentials import SimpleCredential
-from ..errors import InitError, KeyringLocked, PasswordDeleteError, PasswordSetError
+from ..errors import (
+    InitError,
+    KeyringLocked,
+    PasswordNotFound,
+    PasswordSetError,
+    PasswordStoreUnavailable,
+)
 
 try:
     import dbus
@@ -142,9 +148,11 @@ class DBusKeyring(KeyringBackend):
         """Delete the password for the username of the service."""
         if not self.connected(service):
             # the user pressed "cancel" when prompted to unlock their keyring.
-            raise PasswordDeleteError("Cancelled by user")
+            raise PasswordStoreUnavailable(
+                "Cancelled by user", service=service, username=username
+            )
         if not self.iface.hasEntry(self.handle, service, username, self.appid):
-            raise PasswordDeleteError("Password not found")
+            raise PasswordNotFound(service=service, username=username)
         self.iface.removeEntry(self.handle, service, username, self.appid)
 
 
